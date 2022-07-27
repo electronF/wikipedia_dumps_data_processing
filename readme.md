@@ -143,7 +143,7 @@ Ici plusieurs possibilités sont offertes chacune avec ses avantages et inconven
     * puis : compute_and_save_decoded.py
 
 > **Note:**
-* Dans le premiers cas si un problème survient il faudra supprimer le dossier results et tout recommancer. Mais une fois démarrer le script produits directement la base de données attendue.
+* Dans le premiers cas si un problème survient il faudra supprimer le dossier ***results*** et tout recommancer. Mais une fois démarrer le script produits directement la base de données attendue.
 
 * Dans le second cas il faudra recommencer uniquement  l'étape qui pose problème. Mais une présence humaine est necessaire pour lancer chaque script.
 

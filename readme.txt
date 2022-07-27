@@ -5,7 +5,7 @@ Ce document texte comprend la procédure pour utiliser le script
 
 
 ## I. Setup l'environnement de travail
-=====================================
+======================================
 
 ### I.1. Installer Python 3.5 ou plus.
 ======================================
@@ -97,13 +97,13 @@ Elles devraient normalement parmis les 100 premiers résultats. Il faut juste cl
 
 Ici plusieurs possibilités sont offertes chacune avec ses avantages et inconveniants:
 
-1. lancez directement le script : extract_and_compute_data.py
+1. lancez directement le script :
 2. effectuer les étapes sont les suivantes:
     * executer le script : extract_data.py
     * puis : compute_and_save_decoded.py
 
 >>> Note:
-* Dans le premiers cas si un problème survient il faudra supprimer le dossier results et tout recommancer.
+* Dans le premiers cas si un problème survient il faudra supprimer le dossier <<results>> et tout recommancer.
 Mais une fois démarrer le script produits directement la base de données attendue.
 
 * Dans le second cas il faudra recommencer uniquement  l'étape qui pose problème.
@@ -137,7 +137,7 @@ Attendez la fin de l'execution du script marquée par un "End of Processing" et 
 ### III.2. Dans Jupyter Note book
 ==================================
 
-Il suffit d'executer les cellules une à une jusqu'a la dernier celle. 
+Il suffit d'ouvrir le fchier wikipedia_articles.ipynb d'executer les cellules une à une jusqu'a la dernier celle. 
 
 >>> Note: Pas besoin de réésexuter les cellules qui n'ont pas genérer d'erreurs. Mais si pour une raison où une autre le notebook se 
 ferme il faut tout réexécuter. Si l'epate 1 c'est bien effectuer, n'exécuter que l'étape 2.

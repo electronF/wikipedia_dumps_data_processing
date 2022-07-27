@@ -1,0 +1,146 @@
+# coding: utf-8
+
+"""
+Ce programme n'utilise pas de parallélisation donc il risque de prendre un peu plus de temps
+"""
+
+import os
+import re
+import gzip
+import sys
+from tqdm import tqdm 
+from collections import namedtuple
+
+FILEPROPS=namedtuple("Fileprops", "parser num_fields column_indexes")
+
+#CATEGORYLINKS_PARSER=re.compile(r'(?P<row0>[0-9]+?),(?P<row1>\'.*?\'?),(?P<row2>\'.*?\'?),(?P<row3>\'[0-9\ \-:]+\'?),(?P<row4>\'\'?),(?P<row5>\'.*?\'?),(?P<row6>\'.*?\'?)')
+CATEGORYLINKS_PARSER=re.compile(r'^(?P<row0>[0-9]+?),(?P<row1>\'.*?\'?),(?P<row2>\'.*?\'?),(?P<row3>\'[0-9\ \-:]+\'?),(?P<row4>\'.*?\'?),(?P<row5>\'[a-z\-]*?\'?),(?P<row6>\'[a-z]+\'?)$')
+PAGELINKS_PARSER=re.compile(r'^(?P<row0>[0-9]+?),(?P<row1>[0-9]+?),(?P<row2>\'.*?\'?),(?P<row3>[0-9]+?)$')
+LANGLINKS_PARSER=re.compile(r'^(?P<row0>[0-9]+?),(?P<row1>\'.*?\'?),(?P<row2>\'.*?\'?)$')
+REDIRECT_PARSER=re.compile(r'^(?P<row0>[0-9]+?),(?P<row1>-?[0-9]+?),(?P<row2>\'.*?\'?),(?P<row3>\'.*?\'?),(?P<row4>\'.*?\'?)$')
+CATEGORY_PARSER=re.compile(r'^(?P<row0>[0-9]+?),(?P<row1>\'.*?\'?),(?P<row2>[0-9]+?),(?P<row3>[0-9]+?),(?P<row4>[0-9]+?)$')
+PAGE_PROPS_PARSER=re.compile(r'^([0-9]+),(\'.*?\'),(\'.*?\'),(\'[0-9\ \-:]+\'),(\'\'),(\'.*?\'),(\'.*?\')$')
+PAGE_PARSER=re.compile((r'^(?P<row0>[0-9]+?),(?P<row1>[0-9]+?),(?P<row2>\'.*?\'?),(?P<row3>[0-9]+?),(?P<row4>[0-9]?),'
+    r'(?P<row5>[0-9\.]+?),(?P<row6>\'.*?\'?),(?P<row7>(?P<row7val>\'.*?\'?)|(?P<row7null>NULL)),(?P<row8>[0-9]+?),(?P<row9>[0-9]+?),'
+    r'(?P<row10>(?P<row10val>\'.*?\'?)|(?P<row10null>NULL)),(?P<row11>(?P<row11val>\'.*?\'?)|(?P<row11null>NULL))$'))
+
+
+"""
+# page
+`page_id` int(8) unsigned NOT NULL AUTO_INCREMENT,
+`page_namespace` int(11) NOT NULL DEFAULT 0,
+`page_title` varbinary(255) NOT NULL DEFAULT '',
+`page_is_redirect` tinyint(1) unsigned NOT NULL DEFAULT 0,
+`page_is_new` tinyint(1) unsigned NOT NULL DEFAULT 0,
+`page_random` double unsigned NOT NULL DEFAULT 0,
+`page_touched` varbinary(14) NOT NULL,
+`page_links_updated` varbinary(14) DEFAULT NULL,
+`page_latest` int(8) unsigned NOT NULL DEFAULT 0,
+`page_len` int(8) unsigned NOT NULL DEFAULT 0,
+`page_content_model` varbinary(32) DEFAULT NULL,
+`page_lang` varbinary(35) DEFAULT NULL,
+
+#langlinks
+`ll_from` int(8) unsigned NOT NULL DEFAULT 0,
+`ll_lang` varbinary(35) NOT NULL DEFAULT '',
+`ll_title` varbinary(255) NOT NULL DEFAULT '',
+
+# pagelinks
+`pl_from` int(8) unsigned NOT NULL DEFAULT '0',
+`pl_namespace` int(11) NOT NULL DEFAULT '0',
+`pl_title` varbinary(255) NOT NULL DEFAULT '',
+`pl_from_namespace` int(11) NOT NULL DEFAULT '0',
+
+
+"""
+
+
+FILETYPE_PROPS=dict(
+        categorylinks=FILEPROPS(CATEGORYLINKS_PARSER, 7, (0, 1, 6)),
+        pagelinks=FILEPROPS(PAGELINKS_PARSER, 4, (0, 1, 2, 3)),
+        langlinks=FILEPROPS(LANGLINKS_PARSER, 3, (0, 1, 2)),
+        redirect=FILEPROPS(REDIRECT_PARSER, 5, (0, 1, 2)),
+        category=FILEPROPS(CATEGORY_PARSER, 5, (0, 1, 2, 3, 4)),
+        page_props=FILEPROPS(PAGE_PROPS_PARSER, 7, (0, 1)),
+        page=FILEPROPS(PAGE_PARSER, 12, (0, 1, 2, 3, 9, 10, 11)),
+        )
+
+#VALUE_PARSER=re.compile(r'\(([0-9]+),(\'.*?\'),(\'.*?\'),(\'[0-9\ \-:]+\'),(\'\'),(\'.*?\'),(\'.*?\')\)')
+
+def parse_match(match, column_indexes):
+    row = match.groupdict()
+    return tuple(row["row{}".format(i)] for i in column_indexes)
+
+
+def parse_value(value, parser, column_indexes, value_idx=0, pbar=None):
+    # replace unicode dash with ascii dash
+    value = value.replace("\\xe2\\x80\\x93", "-")
+    parsed_correctly = False
+    for i, match in enumerate(parser.finditer(value)):
+        parsed_correctly = True
+        try:
+            row = parse_match(match, column_indexes)
+            yield row
+        except Exception as e:
+            print("Line: {!r}, Exception: {}".format(value, e), file=sys.stderr)
+    if not parsed_correctly:
+        print("Line: {!r}, IDX: {}, Exception: {}".format(value, value_idx, "Unable to parse."), file=sys.stderr)
+
+
+def process_insert_values_line(line, parser, column_indexes, count_inserts=0, pbar=None):
+    start, partition, values = line.partition(' VALUES ')
+    # Each insert statement has format: 
+    # INSERT INTO "table_name" VALUES (v1,v2,v3),(v1,v2,v3),(v1,v2,v3);
+    # When splitting by "),(" we need to only consider string from values[1:-2]
+    # This ignores the starting "(" and ending ");"
+    values = values.strip()[1:-2].split("),(")
+    pbar.set_postfix(found_values=len(values), insert_num=count_inserts)
+    for value_idx, value in enumerate(values):
+        for row in parse_value(value, parser, column_indexes, value_idx, pbar):
+            yield row
+
+
+def process_file(fp, fp_out, filetype, column_indexes=None, silent=False):
+    if filetype not in FILETYPE_PROPS:
+        raise Exception("Invalid filetype: {}".format(filetype))
+    parser, num_fields, ci = FILETYPE_PROPS[filetype]
+    print("Parser: {}\nnum_fields: {}\nci: {}".format(parser, num_fields, ci))
+    valid_row_keys = set(["row{}".format(i) for i in range(num_fields)])
+    if column_indexes is None:
+        column_indexes = ci
+    with tqdm(disable=silent) as pbar:
+        count_inserts = 0
+        for line_no, line in enumerate(fp, start=1):
+            
+            if line.startswith('INSERT INTO `{}` VALUES '.format(filetype)):
+                count_inserts += 1
+                for row in process_insert_values_line(
+                        line, parser, column_indexes, count_inserts, pbar):
+                    if pbar is not None:
+                        pbar.update(1)
+                    print("\t".join(row), file=fp_out)
+
+
+def main():
+    files_to_open = {
+        "page":{
+            "input":"ruwiki-latest-page.sql.gz", 
+            "output":"pages_encoded_version.csv"
+        }, 
+        "langlinks":{
+            "input":"ruwiki-latest-langlinks.sql.gz", 
+            "output":"langlinks_encoded_version.csv"
+        }
+    }
+
+    data_folder = 'data' 
+    if not os.path.exists(data_folder):
+        os.makedirs(data_folder)
+        
+    for database_name in files_to_open:
+        with gzip.open(files_to_open[database_name]["input"], 'rt', encoding='ascii', errors='backslashreplace') as fp, open(os.path.join(data_folder, files_to_open[database_name]["output"]), 'wt', encoding='utf-8') as fp_out:
+            process_file(fp, fp_out, database_name, column_indexes=None, silent=None)
+    print("End of Processing")
+        
+if __name__ == "__main__":
+    main()
